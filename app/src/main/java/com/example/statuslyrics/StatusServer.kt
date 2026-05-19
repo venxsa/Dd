@@ -35,7 +35,7 @@ class StatusServer(private val port: Int = 2137) {
         try {
             val output: OutputStream = socket.getOutputStream()
             
-            // Odpytujemy system za pomocą Shizuku
+            // Pobieramy dane bezpośrednio z systemu za pomocą Shizuku
             val mediaData = getMediaDataViaShizuku()
             
             var spotifyId = ""
@@ -67,18 +67,21 @@ class StatusServer(private val port: Int = 2137) {
         }
     }
 
+    // Klasa pomocnicza na dane
     data class MediaInfo(val track: String, val artist: String, val album: String, val playing: Boolean)
 
     private fun getMediaDataViaShizuku(): MediaInfo {
+        // Jeśli Shizuku nie ma uprawnień, zwracamy pustki
         if (!Shizuku.pingBinder() || Shizuku.checkSelfPermission() != android.content.pm.PackageManager.PERMISSION_GRANTED) {
             return MediaInfo("", "", "", false)
         }
 
         try {
-            // Wywołujemy zrzut sesji multimedialnych przez Shizuku z prawami powłoki ADB
+            // Wykonujemy polecenie systemowe dumpsys przez Shizuku
             val process = Shizuku.newProcess(arrayOf("cmd", "media_session", "dumpsys"), null, null)
             val reader = BufferedReader(InputStreamReader(process.inputStream))
             
+            var currentPackage = ""
             var track = ""
             var artist = ""
             var album = ""
@@ -88,39 +91,23 @@ class StatusServer(private val port: Int = 2137) {
             reader.forEachLine { line ->
                 val trimmed = line.trim()
                 
-                // Wykrywanie bloku Spotify
+                // Szukamy sekcji aktywnej sesji dla Spotify
                 if (trimmed.startsWith("package=")) {
-                    val pkg = trimmed.substringAfter("package=").substringBefore(" ")
-                    inSpotifySection = (pkg == "com.spotify.music")
+                    currentPackage = trimmed.substringAfter("package=").substringBefore(" ")
+                    inSpotifySection = (currentPackage == "com.spotify.music")
                 }
                 
                 if (inSpotifySection) {
-                    // Sposób 1: Czytanie z uniwersalnego pola description
                     if (trimmed.startsWith("description=")) {
+                        // Przykładowy format: description=Tytuł, Wykonawca, Album
                         val desc = trimmed.substringAfter("description=")
-                        if (desc != "null" && desc.contains(",")) {
-                            val parts = desc.split(", ")
-                            if (parts.size >= 1) track = parts[0]
-                            if (parts.size >= 2) artist = parts[1]
-                            if (parts.size >= 3) album = parts[2]
-                        }
+                        val parts = desc.split(", ")
+                        if (parts.size >= 1) track = parts[0]
+                        if (parts.size >= 2) artist = parts[1]
+                        if (parts.size >= 3) album = parts[2]
                     }
-                    
-                    // Sposób 2: Agresywny fallback, gdy system rozbija metadane na klucze we flagach
-                    if (track.isEmpty()) {
-                        if (trimmed.contains("android.media.metadata.TITLE=")) {
-                            track = trimmed.substringAfter("android.media.metadata.TITLE=").substringBefore(",")
-                        }
-                        if (trimmed.contains("android.media.metadata.ARTIST=")) {
-                            artist = trimmed.substringAfter("android.media.metadata.ARTIST=").substringBefore(",")
-                        }
-                        if (trimmed.contains("android.media.metadata.ALBUM=")) {
-                            album = trimmed.substringAfter("android.media.metadata.ALBUM=").substringBefore(",")
-                        }
-                    }
-
-                    // Sprawdzanie stanu odtwarzania (state=3 oznacza odtwarzanie - STATE_PLAYING)
                     if (trimmed.startsWith("state=PlaybackState")) {
+                        // Sprawdzamy czy stan to STATE_PLAYING (zazwyczaj kod 3)
                         if (trimmed.contains("state=3")) {
                             isPlaying = true
                         }
