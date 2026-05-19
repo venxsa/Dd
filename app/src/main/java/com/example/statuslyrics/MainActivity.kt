@@ -1,14 +1,12 @@
 package com.example.statuslyrics
 
-import android.content.ComponentName
-import android.content.Intent
 import android.os.Bundle
-import android.provider.Settings
 import android.widget.Button
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
+import dev.rikka.shizuku.Shizuku
 
-class MainActivity : AppCompatActivity() {
+class MainActivity : AppCompatActivity(), Shizuku.OnRequestPermissionResultListener {
 
     private lateinit var server: StatusServer
     private lateinit var statusTextView: TextView
@@ -19,10 +17,20 @@ class MainActivity : AppCompatActivity() {
 
         statusTextView = findViewById(R.id.statusText)
         val btnPermissions = findViewById<Button>(R.id.btnPermissions)
+        
+        btnPermissions.text = "Autoryzuj przez Shizuku"
 
         btnPermissions.setOnClickListener {
-            startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
+            if (Shizuku.pingBinder()) {
+                // Jeśli Shizuku działa, prosimy o dostęp
+                Shizuku.requestPermission(0)
+            } else {
+                statusTextView.text = "BŁĄD: Shizuku nie jest uruchomione w tle telefonu!"
+            }
         }
+
+        // Rejestrujemy nasłuchiwanie na wynik przyznania uprawnień
+        Shizuku.addRequestPermissionResultListener(this)
 
         server = StatusServer(2137)
         server.start()
@@ -30,31 +38,29 @@ class MainActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
-        // Sprawdzamy przy powrocie do aplikacji, czy użytkownik kliknął zezwolenie
-        if (isNotificationServiceEnabled()) {
-            statusTextView.text = "Serwer StatusLyrics działa na porcie 2137!\nPołączono z powiadomieniami."
+        checkShizukuStatus()
+    }
+
+    private fun checkShizukuStatus() {
+        if (!Shizuku.pingBinder()) {
+            statusTextView.text = "Uruchom najpierw aplikację Shizuku w telefonie!"
+            return
+        }
+
+        if (Shizuku.checkSelfPermission() == android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            statusTextView.text = "Serwer StatusLyrics działa na porcie 2137!\nPołączono poprawnie przez Shizuku."
         } else {
-            statusTextView.text = "Serwer aktywny, ale BRAK dostępu do powiadomień!"
+            statusTextView.text = "Wymagana autoryzacja Shizuku."
         }
     }
 
-    private fun isNotificationServiceEnabled(): Boolean {
-        val pkgName = packageName
-        val flat = Settings.Secure.getString(contentResolver, "enabled_notification_listeners")
-        if (!flat.isNullOrEmpty()) {
-            val names = flat.split(":")
-            for (name in names) {
-                val cn = ComponentName.unflattenFromString(name)
-                if (cn != null && pkgName == cn.packageName) {
-                    return true
-                }
-            }
-        }
-        return false
+    override fun onRequestPermissionResult(requestCode: Int, grantResult: Int) {
+        checkShizukuStatus()
     }
 
     override fun onDestroy() {
         super.onDestroy()
+        Shizuku.removeRequestPermissionResultListener(this)
         server.stop()
     }
 }
