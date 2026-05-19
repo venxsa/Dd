@@ -2,10 +2,10 @@ name: Zbuduj StatusLyrics APK
 
 on:
   push:
-    branches: [ "main" ] # Kompiluje za każdym razem, gdy wrzucisz coś na główną gałąź
+    branches: [ "main" ]
   pull_request:
     branches: [ "main" ]
-  workflow_dispatch: # Pozwala odpalić kompilację ręcznie przyciskiem na GitHubie
+  workflow_dispatch:
 
 jobs:
   build:
@@ -20,8 +20,14 @@ jobs:
       with:
         distribution: 'zulu'
         java-version: '17'
-        cache: 'gradle'
 
+    # Instalujemy gradle w systemie Ubuntu, żeby móc wygenerować wrapper lokalnie w projekcie
+    - name: Zainstaluj Gradle w systemie i wygeneruj Wrapper
+      run: |
+        sudo apt-get update && sudo apt-get install -y gradle
+        gradle wrapper --gradle-version 8.2
+
+    # Teraz plik 'gradlew' już istnieje na 100%, więc możemy nadać mu uprawnienia
     - name: Nadaj uprawnienia do uruchomienia Gradle
       run: chmod +x gradlew
 
