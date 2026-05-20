@@ -12,6 +12,10 @@ class SpotifyReceiver : BroadcastReceiver() {
         var albumName: String = ""
         var trackId: String = ""
         var isPlaying: Boolean = false
+        
+        // Zmienne do precyzyjnej synchronizacji czasu
+        var progressMs: Long = 0
+        var lastUpdateTime: Long = 0
     }
 
     override fun onReceive(context: Context, intent: Intent) {
@@ -22,11 +26,13 @@ class SpotifyReceiver : BroadcastReceiver() {
             artistName = intent.getStringExtra("artist") ?: ""
             albumName = intent.getStringExtra("album") ?: ""
             
-            // Pobieramy oryginalne ID utworu (np. spotify:track:4PTG3Z6e...)
             val rawId = intent.getStringExtra("id") ?: ""
-            trackId = rawId.replace("spotify:track:", "") 
+            trackId = rawId.replace("spotify:track:", "")
+            
         } else if (action == "com.spotify.music.playbackstatechanged") {
             isPlaying = intent.getBooleanExtra("playing", false)
+            progressMs = intent.getIntExtra("playbackPosition", 0).toLong()
+            lastUpdateTime = System.currentTimeMillis()
         }
     }
 }
