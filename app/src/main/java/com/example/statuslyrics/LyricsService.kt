@@ -19,15 +19,18 @@ class LyricsService : Service() {
         super.onCreate()
         startForegroundNotification()
 
-        // Rejestrujemy nasłuchiwanie Spotify wewnątrz nieumieralnej usługi
         val filter = IntentFilter().apply {
             addAction("com.spotify.music.metadatachanged")
             addAction("com.spotify.music.playbackstatechanged")
             addAction("com.spotify.music.queuechanged")
         }
-        registerReceiver(spotifyReceiver, filter, Context.RECEIVER_EXPORTED)
+        
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            registerReceiver(spotifyReceiver, filter, Context.RECEIVER_EXPORTED)
+        } else {
+            registerReceiver(spotifyReceiver, filter)
+        }
 
-        // Uruchamiamy serwer HTTP i pętlę LRCLIB
         server = StatusServer(2137)
         server?.start()
     }
@@ -37,11 +40,7 @@ class LyricsService : Service() {
         val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val channel = NotificationChannel(
-                channelId,
-                "StatusLyrics Aktywność w Tle",
-                NotificationManager.IMPORTANCE_LOW
-            )
+            val channel = NotificationChannel(channelId, "StatusLyrics Aktywność w Tle", NotificationManager.IMPORTANCE_LOW)
             manager.createNotificationChannel(channel)
         }
 
@@ -61,19 +60,11 @@ class LyricsService : Service() {
         startForeground(1, notification)
     }
 
-    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        return START_STICKY // Informuje system, że w razie braku pamięci ma od razu włączyć usługę ponownie
-    }
-
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int = START_STICKY
     override fun onDestroy() {
         super.onDestroy()
         server?.stop()
-        try {
-            unregisterReceiver(spotifyReceiver)
-        } catch (e: Exception) {
-            e.printStackTrace()
-        }
+        try { unregisterReceiver(spotifyReceiver) } catch (e: Exception) {}
     }
-
     override fun onBind(intent: Intent?): IBinder? = null
 }
