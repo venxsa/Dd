@@ -10,10 +10,9 @@ class SpotifyReceiver : BroadcastReceiver() {
         var trackName: String = ""
         var artistName: String = ""
         var albumName: String = ""
-        var trackId: String = ""
+        var durationSec: Int = 0
         var isPlaying: Boolean = false
         
-        // Zmienne do precyzyjnej synchronizacji czasu
         var progressMs: Long = 0
         var lastUpdateTime: Long = 0
     }
@@ -26,8 +25,9 @@ class SpotifyReceiver : BroadcastReceiver() {
             artistName = intent.getStringExtra("artist") ?: ""
             albumName = intent.getStringExtra("album") ?: ""
             
-            val rawId = intent.getStringExtra("id") ?: ""
-            trackId = rawId.replace("spotify:track:", "")
+            // Pobieramy długość utworu w milisekundach i zmieniamy na sekundy dla LRCLIB
+            val durationMs = intent.getIntExtra("length", 0)
+            durationSec = durationMs / 1000
             
         } else if (action == "com.spotify.music.playbackstatechanged") {
             isPlaying = intent.getBooleanExtra("playing", false)
