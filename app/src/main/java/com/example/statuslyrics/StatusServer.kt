@@ -17,14 +17,30 @@ class StatusServer(private val port: Int = 2137) {
     private var cachedTrackKey = ""
     private var cachedLines = ArrayList<Pair<Long, String>>()
     private var currentLyricText = "Oczekiwanie..."
+    
+    private var localProgressMs: Long = 0
+    private var lastTickTime: Long = 0
 
     fun start() {
         isRunning = true
+        lastTickTime = System.currentTimeMillis()
         
-        // Ta pętla dba o odświeżanie tekstu co 200ms w tle systemu
         thread {
             while (isRunning) {
                 try {
+                    val now = System.currentTimeMillis()
+                    val elapsed = now - lastTickTime
+                    lastTickTime = now
+
+                    if (SpotifyReceiver.isPlaying) {
+                        localProgressMs += elapsed
+                    }
+
+                    val spotifyEstimated = SpotifyReceiver.progressMs + (now - SpotifyReceiver.lastUpdateTime)
+                    if (SpotifyReceiver.isPlaying && Math.abs(localProgressMs - spotifyEstimated) > 1000) {
+                        localProgressMs = spotifyEstimated
+                    }
+
                     updateLyricsPosition()
                     Thread.sleep(200)
                 } catch (e: Exception) {
@@ -33,7 +49,6 @@ class StatusServer(private val port: Int = 2137) {
             }
         }
 
-        // Serwer HTTP nasłuchujący bota Pythona
         thread {
             try {
                 serverSocket = ServerSocket(port)
@@ -84,11 +99,11 @@ class StatusServer(private val port: Int = 2137) {
             return
         }
 
-        // Unikalny klucz piosenki, by sprawdzić czy utwór uległ zmianie
         val currentTrackKey = "$track|$artist|$duration"
         if (currentTrackKey != cachedTrackKey) {
             cachedTrackKey = currentTrackKey
             cachedLines.clear()
+            localProgressMs = SpotifyReceiver.progressMs
             fetchLyricsFromLrclib(track, artist, album, duration)
         }
 
@@ -97,25 +112,21 @@ class StatusServer(private val port: Int = 2137) {
             return
         }
 
-        // Precyzyjne liczenie milisekund postępu piosenki
-        val timePassed = System.currentTimeMillis() - SpotifyReceiver.lastUpdateTime
-        val estimatedProgress = SpotifyReceiver.progressMs + timePassed
-
         var bestMatch = ""
         for (line in cachedLines) {
-            if (estimatedProgress >= line.first) {
+            if (localProgressMs >= line.first) {
                 bestMatch = line.second
             } else {
                 break
             }
         }
+        
         currentLyricText = bestMatch.ifEmpty { "$track - $artist" }
     }
 
     private fun fetchLyricsFromLrclib(track: String, artist: String, album: String, duration: Int) {
         thread {
             try {
-                // Kodujemy parametry tekstowe do bezpiecznego formatu URL
                 val tEncoded = URLEncoder.encode(track, "UTF-8")
                 val aEncoded = URLEncoder.encode(artist, "UTF-8")
                 val alEncoded = URLEncoder.encode(album, "UTF-8")
@@ -153,9 +164,11 @@ class StatusServer(private val port: Int = 2137) {
                 val secParts = minSec[1].split(".")
                 val seconds = secParts[0].toLong()
                 
-                // Poprawne parsowanie setnych części sekundy na milisekundy
-                val msStr = secParts[1]
-                val millis = msStr.toLong() * (if (msStr.length == 2) 10 else 1)
+                val msStr = secParts[1].trim()
+                var millis = msStr.toLong()
+                if (msStr.length == 2) {
+                    millis *= 10
+                }
 
                 val totalMs = (minutes * 60 * 1000) + (seconds * 1000) + millis
                 lines.add(Pair(totalMs, words))
@@ -163,6 +176,7 @@ class StatusServer(private val port: Int = 2137) {
                 continue
             }
         }
+        lines.sortBy { it.first }
         cachedLines = lines
     }
 
