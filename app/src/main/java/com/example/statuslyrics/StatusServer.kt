@@ -14,15 +14,14 @@ class StatusServer(private val port: Int = 2137) {
     private var serverSocket: ServerSocket? = null
     private var isRunning = false
 
-    // Cache na napisy, żeby nie odpytywać LRCLIB przy każdym zapytaniu serwera
-    private var cachedTrackId = ""
+    private var cachedTrackKey = ""
     private var cachedLines = ArrayList<Pair<Long, String>>()
     private var currentLyricText = "Oczekiwanie..."
 
     fun start() {
         isRunning = true
         
-        // Pętla odświeżania tekstu co 200ms bezpośrednio w telefonie
+        // Ta pętla dba o odświeżanie tekstu co 200ms w tle systemu
         thread {
             while (isRunning) {
                 try {
@@ -34,7 +33,7 @@ class StatusServer(private val port: Int = 2137) {
             }
         }
 
-        // Serwer HTTP dla bota
+        // Serwer HTTP nasłuchujący bota Pythona
         thread {
             try {
                 serverSocket = ServerSocket(port)
@@ -50,7 +49,6 @@ class StatusServer(private val port: Int = 2137) {
                                     "track": "${SpotifyReceiver.trackName.replace("\"", "\\\"")}",
                                     "artist": "${SpotifyReceiver.artistName.replace("\"", "\\\"")}",
                                     "album": "${SpotifyReceiver.albumName.replace("\"", "\\\"")}",
-                                    "spotify_id": "${SpotifyReceiver.trackId}",
                                     "current_lyric": "${currentLyricText.replace("\"", "\\\"")}"
                                 }
                             """.trimIndent()
@@ -75,27 +73,31 @@ class StatusServer(private val port: Int = 2137) {
         }
     }
 
-    // Funkcja wylicza aktualną milisekundę i dopasowuje tekst z LRCLIB
     private fun updateLyricsPosition() {
-        val trackId = SpotifyReceiver.trackId
-        if (trackId.isEmpty() || !SpotifyReceiver.isPlaying) {
-            currentLyricText = if (trackId.isEmpty()) "Brak utworu" else "Muzyka zatrzymana"
+        val track = SpotifyReceiver.trackName
+        val artist = SpotifyReceiver.artistName
+        val album = SpotifyReceiver.albumName
+        val duration = SpotifyReceiver.durationSec
+
+        if (track.isEmpty() || !SpotifyReceiver.isPlaying) {
+            currentLyricText = if (track.isEmpty()) "Brak utworu" else "Muzyka zatrzymana"
             return
         }
 
-        // Jeśli zmieniła się piosenka, pobieramy świeże LRC z LRCLIB
-        if (trackId != cachedTrackId) {
-            cachedTrackId = trackId
+        // Unikalny klucz piosenki, by sprawdzić czy utwór uległ zmianie
+        val currentTrackKey = "$track|$artist|$duration"
+        if (currentTrackKey != cachedTrackKey) {
+            cachedTrackKey = currentTrackKey
             cachedLines.clear()
-            fetchLyricsFromLrclib(trackId)
+            fetchLyricsFromLrclib(track, artist, album, duration)
         }
 
         if (cachedLines.isEmpty()) {
-            currentLyricText = "${SpotifyReceiver.trackName} - ${SpotifyReceiver.artistName}"
+            currentLyricText = "$track - $artist"
             return
         }
 
-        // Liczymy dokładny postęp odtwarzania w danej chwili
+        // Precyzyjne liczenie milisekund postępu piosenki
         val timePassed = System.currentTimeMillis() - SpotifyReceiver.lastUpdateTime
         val estimatedProgress = SpotifyReceiver.progressMs + timePassed
 
@@ -107,23 +109,28 @@ class StatusServer(private val port: Int = 2137) {
                 break
             }
         }
-        currentLyricText = bestMatch.ifEmpty { "${SpotifyReceiver.trackName} - ${SpotifyReceiver.artistName}" }
+        currentLyricText = bestMatch.ifEmpty { "$track - $artist" }
     }
 
-    private fun fetchLyricsFromLrclib(trackId: String) {
+    private fun fetchLyricsFromLrclib(track: String, artist: String, album: String, duration: Int) {
         thread {
             try {
-                val url = URL("https://lrclib.net/api/get?spotifyTrackId=$trackId")
+                // Kodujemy parametry tekstowe do bezpiecznego formatu URL
+                val tEncoded = URLEncoder.encode(track, "UTF-8")
+                val aEncoded = URLEncoder.encode(artist, "UTF-8")
+                val alEncoded = URLEncoder.encode(album, "UTF-8")
+
+                val url = URL("https://lrclib.net/api/get?artist_name=$aEncoded&track_name=$tEncoded&album_name=$alEncoded&duration=$duration")
                 val connection = url.openConnection() as HttpURLConnection
                 connection.requestMethod = "GET"
-                connection.connectTimeout = 3000
+                connection.setRequestProperty("User-Agent", "StatusLyricsRPC/1.0 (https://github.com)")
+                connection.connectTimeout = 4000
 
                 if (connection.responseCode == 200) {
                     val text = connection.inputStream.bufferedReader().use { it.readText() }
                     val json = JSONObject(text)
                     if (json.has("syncedLyrics")) {
-                        val syncedLyrics = json.getString("syncedLyrics")
-                        parseLrc(syncedLyrics)
+                        parseLrc(json.getString("syncedLyrics"))
                     }
                 }
             } catch (e: Exception) {
@@ -145,7 +152,10 @@ class StatusServer(private val port: Int = 2137) {
                 val minutes = minSec[0].toLong()
                 val secParts = minSec[1].split(".")
                 val seconds = secParts[0].toLong()
-                val millis = secParts[1].toLong() * (if (secParts[1].length == 2) 10 else 1)
+                
+                // Poprawne parsowanie setnych części sekundy na milisekundy
+                val msStr = secParts[1]
+                val millis = msStr.toLong() * (if (msStr.length == 2) 10 else 1)
 
                 val totalMs = (minutes * 60 * 1000) + (seconds * 1000) + millis
                 lines.add(Pair(totalMs, words))
