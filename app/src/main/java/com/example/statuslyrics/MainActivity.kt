@@ -1,66 +1,50 @@
 package com.example.statuslyrics
 
+import android.content.Context
+import android.content.IntentFilter
+import android.os.Build
 import android.os.Bundle
-import android.widget.Button
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
-import dev.rikka.shizuku.Shizuku
 
-class MainActivity : AppCompatActivity(), Shizuku.OnRequestPermissionResultListener {
+class MainActivity : AppCompatActivity() {
 
     private lateinit var server: StatusServer
-    private lateinit var statusTextView: TextView
+    private val spotifyReceiver = SpotifyReceiver()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
-        statusTextView = findViewById(R.id.statusText)
-        val btnPermissions = findViewById<Button>(R.id.btnPermissions)
-        
-        btnPermissions.text = "Autoryzuj przez Shizuku"
+        val statusTextView = findViewById<TextView>(R.id.statusText)
+        statusTextView.text = "Serwer StatusLyrics aktywny port: 2137\nNasłuchiwanie piosenek ze Spotify działa!"
 
-        btnPermissions.setOnClickListener {
-            if (Shizuku.pingBinder()) {
-                // Jeśli Shizuku działa, prosimy o dostęp
-                Shizuku.requestPermission(0)
-            } else {
-                statusTextView.text = "BŁĄD: Shizuku nie jest uruchomione w tle telefonu!"
-            }
+        // Filtry komunikatów bezpośrednio z transmisji Spotify
+        val filter = IntentFilter().apply {
+            addAction("com.spotify.music.metadatachanged")
+            addAction("com.spotify.music.playbackstatechanged")
+            addAction("com.spotify.music.queuechanged")
         }
 
-        // Rejestrujemy nasłuchiwanie na wynik przyznania uprawnień
-        Shizuku.addRequestPermissionResultListener(this)
+        // Rejestracja bezpieczna dla nowych wersji Androida
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            registerReceiver(spotifyReceiver, filter, Context.RECEIVER_EXPORTED)
+        } else {
+            registerReceiver(spotifyReceiver, filter)
+        }
 
+        // Start serwera HTTP
         server = StatusServer(2137)
         server.start()
     }
 
-    override fun onResume() {
-        super.onResume()
-        checkShizukuStatus()
-    }
-
-    private fun checkShizukuStatus() {
-        if (!Shizuku.pingBinder()) {
-            statusTextView.text = "Uruchom najpierw aplikację Shizuku w telefonie!"
-            return
-        }
-
-        if (Shizuku.checkSelfPermission() == android.content.pm.PackageManager.PERMISSION_GRANTED) {
-            statusTextView.text = "Serwer StatusLyrics działa na porcie 2137!\nPołączono poprawnie przez Shizuku."
-        } else {
-            statusTextView.text = "Wymagana autoryzacja Shizuku."
-        }
-    }
-
-    override fun onRequestPermissionResult(requestCode: Int, grantResult: Int) {
-        checkShizukuStatus()
-    }
-
     override fun onDestroy() {
         super.onDestroy()
-        Shizuku.removeRequestPermissionResultListener(this)
         server.stop()
+        try {
+            unregisterReceiver(spotifyReceiver)
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
     }
 }
