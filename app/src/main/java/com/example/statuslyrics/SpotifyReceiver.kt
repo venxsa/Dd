@@ -22,6 +22,7 @@ class SpotifyReceiver : BroadcastReceiver() {
             artistName = intent.getStringExtra("artist") ?: ""
             albumName = intent.getStringExtra("album") ?: ""
             
+            // Pobieramy oryginalne ID utworu (np. spotify:track:4PTG3Z6e...)
             val rawId = intent.getStringExtra("id") ?: ""
             trackId = rawId.replace("spotify:track:", "") 
         } else if (action == "com.spotify.music.playbackstatechanged") {
